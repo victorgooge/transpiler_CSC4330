@@ -8,7 +8,10 @@ class PythonToJS(ast.NodeVisitor):
     def current_scope(self):
         return self.scope_stack[-1]
 
-    def is_defined(self, name):
+    def is_defined_local(self, name):
+        return name in self.current_scope()
+
+    def is_defined_anywhere(self, name):
         return any(name in scope for scope in reversed(self.scope_stack))
 
     def define_var(self, name):
@@ -22,10 +25,14 @@ class PythonToJS(ast.NodeVisitor):
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             target = node.targets[0].id
             value = self.convert_expr(node.value)
-            if target in self.current_scope():
+            if self.is_defined_local(target):
                 self.js_code.append(f"{target} = {value};")
-            elif self.is_defined(target):
-                self.js_code.append(f"{target} = {value};")
+            elif self.is_defined_anywhere(target):
+                if len(self.scope_stack) > 1:
+                    self.define_var(target)
+                    self.js_code.append(f"let {target} = {value};")
+                else:
+                    self.js_code.append(f"{target} = {value};")
             else:
                 self.define_var(target)
                 self.js_code.append(f"let {target} = {value};")
@@ -40,6 +47,10 @@ class PythonToJS(ast.NodeVisitor):
             self.visit(stmt)
         self.scope_stack.pop()
         self.js_code.append("}")
+
+    def visit_Return(self, node):
+        value = self.convert_expr(node.value)
+        self.js_code.append(f"  return {value};")
 
     def visit_Expr(self, node):
         if isinstance(node.value, ast.Call):
@@ -82,6 +93,10 @@ class PythonToJS(ast.NodeVisitor):
             for op, comp in zip(node.ops, node.comparators):
                 comparisons.append(f"{self.convert_operator(op)} {self.convert_expr(comp)}")
             return f"({left} {' '.join(comparisons)})"
+        elif isinstance(node, ast.Call):
+            func = self.convert_expr(node.func)
+            args = ', '.join(self.convert_expr(arg) for arg in node.args)
+            return f"{func}({args})"
         else:
             return '/* unsupported expression */'
 
@@ -96,45 +111,31 @@ class PythonToJS(ast.NodeVisitor):
         return operators.get(type(op), '/* unsupported op */')
 
     def generic_visit(self, node):
-        # For unsupported nodes, just note them
         self.js_code.append(f"  // Unsupported: {type(node).__name__}")
 
     def transpile(self, python_code):
+        self.js_code = []  # Clear previous state
         tree = ast.parse(python_code)
         self.visit(tree)
         return '\n'.join(self.js_code)
 
 
 if __name__ == "__main__":
-    import os
+    from pathlib import Path
 
-    python_code = '''
+    # Getting input.py file path from this current project directory
+    PROJECT_DIR = Path(__file__).parent
+    input_file = PROJECT_DIR / "input.py"
+    # Reading and storing source code content
+    with open(input_file, "r") as f:
+        python_code = f.read()
 
-x = 100
-y = 5
-print(x * y)
-
-def evalNums(a, b):
-    if x > y:
-        print("yuhhh")
-    else:
-        print("nahhh")
-evalNums(x, y)
-
-x = 0
-evalNums(x, y)
-
-def printANum(num):
-    x = num
-    print(x)
-
-printANum(42)
-
-'''
+    # Transpilation to js
     transpiler = PythonToJS()
     js_output = transpiler.transpile(python_code)
-
+    # Writing js file
     with open("output.js", "w") as f:
         f.write(js_output)
 
+    # Success prompt
     print("JavaScript code written to output.js")
