@@ -46,20 +46,29 @@ class PythonToJS(ast.NodeVisitor):
                 self.emit_blank_line()
 
     def visit_Assign(self, node):
-        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-            target = node.targets[0].id
-            value = self.convert_expr(node.value)
-            if self.is_defined_local(target):
-                self.emit(f"{target} = {value};")
-            elif self.is_defined_anywhere(target):
-                if len(self.scope_stack) > 1:
+        if len(node.targets) == 1:
+            if isinstance(node.targets[0], ast.Name):
+                target = node.targets[0].id
+                value = self.convert_expr(node.value)
+                if not self.is_defined_anywhere(target):
                     self.define_var(target)
                     self.emit(f"let {target} = {value};")
                 else:
                     self.emit(f"{target} = {value};")
-            else:
-                self.define_var(target)
-                self.emit(f"let {target} = {value};")
+            elif isinstance(node.targets[0], ast.Tuple):
+                # Handle tuple unpacking
+                value = self.convert_expr(node.value)
+                for i, target in enumerate(node.targets[0].elts):
+                    if isinstance(target, ast.Name):
+                        if not self.is_defined_anywhere(target.id):
+                            self.define_var(target.id)
+                            self.emit(f"let {target.id} = {value}[{i}];")
+                        else:
+                            self.emit(f"{target.id} = {value}[{i}];")
+            elif isinstance(node.targets[0], ast.Subscript):
+                target = self.convert_expr(node.targets[0])
+                value = self.convert_expr(node.value)
+                self.emit(f"{target} = {value};")
         else:
             self.emit("// Unsupported assignment structure")
 
@@ -183,8 +192,14 @@ class PythonToJS(ast.NodeVisitor):
 
     def convert_expr(self, node):
         if isinstance(node, ast.Constant):
+            if isinstance(node.value, bool):
+                return str(node.value).lower()
             return repr(node.value)
         elif isinstance(node, ast.Name):
+            if node.id == 'len':
+                return '/* len */'  
+            elif node.id == 'range':
+                return '/* range */'  
             return node.id
         elif isinstance(node, ast.BinOp):
             left = self.convert_expr(node.left)
@@ -198,13 +213,11 @@ class PythonToJS(ast.NodeVisitor):
             for v in node.values:
                 expr = self.convert_expr(v)
                 # Only wrap if it's not a simple literal or name
-                if isinstance(v, (ast.Constant, ast.Name)):
+                if isinstance(v, (ast.Constant, ast.Name, ast.UnaryOp)):
                     parts.append(expr)
                 else:
                     parts.append(f"({expr})")
-            return f" {op} ".join(parts)
-
-
+            return f"{f' {op} '.join(parts)}"
 
         elif isinstance(node, ast.Compare):
             left = self.convert_expr(node.left)
@@ -214,8 +227,23 @@ class PythonToJS(ast.NodeVisitor):
             return f"({left} {' '.join(comparisons)})"
         elif isinstance(node, ast.Call):
             func = self.convert_expr(node.func)
-            args = ', '.join(self.convert_expr(arg) for arg in node.args)
-            return f"{func}({args})"
+            args = [self.convert_expr(arg) for arg in node.args]
+            
+            if func == '/* len */':
+                if args:
+                    return f"{args[0]}.length"
+                return '0'
+            
+            elif func == '/* range */':
+                if len(args) == 1:
+                    return f"Array.from({{length: {args[0]}}}).map((_, i) => i)"
+                elif len(args) == 2:
+                    return f"Array.from({{length: {args[1]} - {args[0]}}}).map((_, i) => i + {args[0]})"
+                elif len(args) == 3:
+                    return f"Array.from({{length: Math.floor(({args[1]} - {args[0]}) / {args[2]})}}).map((_, i) => i * {args[2]} + {args[0]})"
+                return '[]'
+            
+            return f"{func}({', '.join(args)})"
         elif isinstance(node, ast.List):
             return '[' + ', '.join(self.convert_expr(e) for e in node.elts) + ']'
         elif isinstance(node, ast.Tuple):
@@ -226,6 +254,48 @@ class PythonToJS(ast.NodeVisitor):
             keys = [self.convert_expr(k) for k in node.keys]
             values = [self.convert_expr(v) for v in node.values]
             return '{' + ', '.join(f"{k}: {v}" for k, v in zip(keys, values)) + '}'
+        elif isinstance(node, ast.JoinedStr):
+            parts = []
+            for value in node.values:
+                if isinstance(value, ast.Constant):
+                    parts.append(value.value)
+                elif isinstance(value, ast.FormattedValue):
+                    expr = self.convert_expr(value.value)
+                    if value.format_spec:
+                        if '.2f' in str(value.format_spec):
+                            expr = f"{expr}.toFixed(2)"
+                    parts.append(f"${{{expr}}}")
+            return f"`{''.join(parts)}`"
+        elif isinstance(node, ast.Attribute):
+            value = self.convert_expr(node.value)
+            method_map = {
+                'append': 'push',
+                'extend': 'push',
+                'remove': 'splice',
+                'pop': 'pop',
+                'clear': 'length = 0',
+                'index': 'indexOf',
+                'count': 'filter(x => x ===).length',
+                'sort': 'sort',
+                'reverse': 'reverse',
+            }
+            attr = method_map.get(node.attr, node.attr)
+            return f"{value}.{attr}"
+        elif isinstance(node, ast.ListComp):
+            return self.visit_ListComp(node)
+        elif isinstance(node, ast.Subscript):
+            value = self.convert_expr(node.value)
+            if isinstance(node.slice, ast.Index):
+                index = self.convert_expr(node.slice.value)
+            else:
+                index = self.convert_expr(node.slice)
+            return f"{value}[{index}]"
+        elif isinstance(node, ast.UnaryOp):
+            op = self.convert_operator(node.op)
+            operand = self.convert_expr(node.operand)
+            if isinstance(node.op, ast.Not):
+                return f"(!{operand})"
+            return f"{op}{operand}"
         else:
             return '/* unsupported expression */'
 
@@ -235,9 +305,45 @@ class PythonToJS(ast.NodeVisitor):
             ast.Mod: '%', ast.Pow: '**', ast.FloorDiv: '//',
             ast.And: '&&', ast.Or: '||',
             ast.Eq: '==', ast.NotEq: '!=', ast.Lt: '<', ast.LtE: '<=',
-            ast.Gt: '>', ast.GtE: '>='
+            ast.Gt: '>', ast.GtE: '>=',
+            ast.Not: '!', ast.USub: '-', ast.UAdd: '+'
         }
         return operators.get(type(op), '/* unsupported op */')
+
+    def visit_AugAssign(self, node):
+        target = self.convert_expr(node.target)
+        value = self.convert_expr(node.value)
+        op = self.convert_operator(node.op)
+        self.emit(f"{target} {op}= {value};")
+
+    def visit_Attribute(self, node):
+        value = self.convert_expr(node.value)
+        return f"{value}.{node.attr}"
+
+    def visit_ListComp(self, node):
+        elt = self.convert_expr(node.elt)
+        generators = node.generators[0]  
+        target = self.convert_expr(generators.target)
+        iter_expr = self.convert_expr(generators.iter)
+        
+        filters = []
+        for if_clause in generators.ifs:
+            filters.append(self.convert_expr(if_clause))
+        
+        if isinstance(generators.iter, ast.Call) and isinstance(generators.iter.func, ast.Name) and generators.iter.func.id == 'range':
+            if len(generators.iter.args) == 1:
+                end = self.convert_expr(generators.iter.args[0])
+                array_expr = f"Array.from({{length: {end}}}).map((_, {target}) => {elt})"
+            else:
+                self.emit("// Range with start/step not fully supported")
+                array_expr = "[]"
+        else:
+            array_expr = f"Array.from({iter_expr}).map({target} => {elt})"
+        
+        for filter_expr in filters:
+            array_expr += f".filter({target} => {filter_expr})"
+        
+        return array_expr
 
     def generic_visit(self, node):
         self.emit(f"// Unsupported: {type(node).__name__}")
