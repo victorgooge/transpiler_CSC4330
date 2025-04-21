@@ -269,6 +269,9 @@ class PythonToJS(ast.NodeVisitor):
 
             if isinstance(node.op, ast.FloorDiv):
                 return f"Math.floor({left} / {right})"
+            if isinstance(node.op, ast.Pow):
+                return f"Math.pow({left}, {right})"
+
             return f"{left} {op_str} {right}"
 
 
@@ -374,13 +377,16 @@ class PythonToJS(ast.NodeVisitor):
     def convert_operator(self, op):
         operators = {
             ast.Add: '+', ast.Sub: '-', ast.Mult: '*', ast.Div: '/',
-            ast.Mod: '%', ast.Pow: '**',
+            ast.Mod: '%',
             ast.And: '&&', ast.Or: '||',
-            ast.Eq: '==', ast.NotEq: '!=', ast.Lt: '<', ast.LtE: '<=',
+            ast.Eq: '===', ast.NotEq: '!=', ast.Lt: '<', ast.LtE: '<=',
             ast.Gt: '>', ast.GtE: '>=',
+            ast.Is: '===',         
+            ast.IsNot: '!==',   
             ast.Not: '!', ast.USub: '-', ast.UAdd: '+'
         }
         return operators.get(type(op), '/* unsupported op */')
+
 
     def visit_AugAssign(self, node):
         target = self.convert_expr(node.target)

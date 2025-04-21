@@ -1,62 +1,88 @@
-# Variables and arithmetic
-x = 10
-y = 5
-z = x * y + 2
+# This is a one-line comment
 
-print("z:", z)
+"""
+This is a multi-line comment
+that should become a block comment
+in JavaScript output.
+"""
 
-# Function and return
-def add(a, b):
-    result = a + b
-    return result
+# Loops with range()
+arr = [1, 2, 3, 4, 5]
+for i in range(len(arr)):
+    arr[i] += 1
+    if i == len(arr) - 1:
+        break
+    else:
+        continue
 
-sum_val = add(x, y)
-print("sum:", sum_val)
+# For-each loop
+names = ["Alice", "Bob", "Charlie"]
+for name in names:
+    print(name)
 
-# If/else conditional
-if x > y:
-    print("x is greater")
+# Range with single argument
+for i in range(3):
+    print(i)
+
+# Range with start and stop
+for i in range(2, 5):
+    print(i)
+
+# Range with step
+for i in range(0, 10, 2):
+    print(i)
+
+# If/elif/else
+n = 3
+if n == 1:
+    print("One")
+elif n == 2:
+    print("Two")
 else:
-    print("y is greater or equal")
+    print("Something else")
 
-# For loop with list
-numbers = [1, 2, 3]
-for n in numbers:
-    print(n)
+# Function definition
+def greet(name):
+    print("Hello", name)
+    return name + "!"
 
-# While loop
-count = 0
-while count < 3:
-    print("counting:", count)
-    count = count + 1
+greet("Victor")
 
-# Data structures
-my_list = [10, 20, 30]
-my_tuple = (1, 2)
-my_set = {3, 4, 5}
-my_dict = {"a": 1, "b": 2}
+# Tuple unpacking
+point = (10, 20)
+x, y = point
+print(x)
+print(y)
 
-# Access data
-print(my_list)
-print(my_tuple)
-print(my_set)
-print(my_dict)
+# List comprehension
+squares = [x * x for x in range(5)]
+print(squares)
 
-# Match statement (Python 3.10+)
-def respond(status):
-    match status:
-        case "ok":
-            print("Everything is fine")
-        case "error":
-            print("Something went wrong")
-        case _:
-            print("Unknown status")
+# Augmented assignments
+a = 5
+a += 2
+a -= 1
+a *= 3
+a /= 2
+print(a)
 
-respond("ok")
-respond("error")
-respond("idk")
+# PEMDAS precedence
+result = 2 + 3 * 4 ** 2 / (1 + 1)
+print(result)
 
-'''
-Testing with
-mulit-line comments.
-'''
+# match-case (switch)
+lang = "JavaScript"
+
+match lang:
+    case "Python":
+        print("Interpreted")
+    case "JavaScript":
+        print("Dynamic")
+    case _:
+        print("Unknown")
+
+# None and Boolean
+status = None
+flag = True
+if not flag and status is None:
+    print("All good")
