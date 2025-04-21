@@ -155,9 +155,36 @@ class PythonToJS(ast.NodeVisitor):
             self.emit("}")
 
     def visit_For(self, node):
-        target = self.convert_expr(node.target)
-        iter_ = self.convert_expr(node.iter)
-        self.emit(f"for (let {target} of {iter_}) {{")
+        # Check for range(...)
+        if (
+            isinstance(node.iter, ast.Call)
+            and isinstance(node.iter.func, ast.Name)
+            and node.iter.func.id == 'range'
+        ):
+            args = node.iter.args
+            target = self.convert_expr(node.target)
+
+            if len(args) == 1:
+                stop = self.convert_expr(args[0])
+                self.emit(f"for (let {target} = 0; {target} < {stop}; {target}++) {{")
+            elif len(args) == 2:
+                start = self.convert_expr(args[0])
+                stop = self.convert_expr(args[1])
+                self.emit(f"for (let {target} = {start}; {target} < {stop}; {target}++) {{")
+            elif len(args) == 3:
+                start = self.convert_expr(args[0])
+                stop = self.convert_expr(args[1])
+                step = self.convert_expr(args[2])
+                self.emit(f"for (let {target} = {start}; {step} > 0 ? {target} < {stop} : {target} > {stop}; {target} += {step}) {{")
+            else:
+                self.emit(f"// Unsupported range with {len(args)} args")
+                return
+        else:
+            # fallback to: for x in iterable
+            target = self.convert_expr(node.target)
+            iter_ = self.convert_expr(node.iter)
+            self.emit(f"for (let {target} of {iter_}) {{")
+
         self.indent_level += 1
         self.scope_stack.append(set())
         for stmt in node.body:
@@ -165,6 +192,8 @@ class PythonToJS(ast.NodeVisitor):
         self.scope_stack.pop()
         self.indent_level -= 1
         self.emit("}")
+
+
 
     def visit_While(self, node):
         test = self.convert_expr(node.test)
@@ -174,6 +203,12 @@ class PythonToJS(ast.NodeVisitor):
             self.visit(stmt)
         self.indent_level -= 1
         self.emit("}")
+
+    def visit_Break(self, node):
+        self.emit("break;")
+
+    def visit_Continue(self, node):
+        self.emit("continue;")
 
     def visit_Match(self, node):
         subject = self.convert_expr(node.subject)
@@ -255,7 +290,13 @@ class PythonToJS(ast.NodeVisitor):
             comparisons = []
             for op, comp in zip(node.ops, node.comparators):
                 comparisons.append(f"{self.convert_operator(op)} {self.convert_expr(comp)}")
-            return f"({left} {' '.join(comparisons)})"
+            
+            # Only wrap if there are multiple comparisons (Python allows chaining: a < b < c)
+            comparison_str = f"{left} {' '.join(comparisons)}"
+            if len(node.ops) > 1:
+                return f"({comparison_str})"
+            return comparison_str
+
         elif isinstance(node, ast.Call):
             func = self.convert_expr(node.func)
             args = [self.convert_expr(arg) for arg in node.args]
