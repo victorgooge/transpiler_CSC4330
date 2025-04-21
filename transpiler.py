@@ -10,6 +10,19 @@ class PythonToJS(ast.NodeVisitor):
         self.scope_stack = [set()]
         self.comments = comments or {}
         self.last_lineno = 0
+        self.BIN_OP_PRECEDENCE = {
+            ast.Pow: 15,
+            ast.Mult: 14, ast.MatMult: 14, ast.Div: 14, ast.FloorDiv: 14, ast.Mod: 14,
+            ast.Add: 13, ast.Sub: 13,
+            ast.LShift: 12, ast.RShift: 12,
+            ast.BitAnd: 11,
+            ast.BitXor: 10,
+            ast.BitOr: 9,
+            ast.Eq: 8, ast.NotEq: 8, ast.Lt: 8, ast.LtE: 8, ast.Gt: 8, ast.GtE: 8,
+            ast.Is: 8, ast.IsNot: 8, ast.In: 8, ast.NotIn: 8,
+            ast.And: 6,
+            ast.Or: 5
+        }
 
     def emit(self, line=""):
         self.js_code.append("  " * self.indent_level + line)
@@ -50,7 +63,7 @@ class PythonToJS(ast.NodeVisitor):
             if isinstance(node.targets[0], ast.Name):
                 target = node.targets[0].id
                 value = self.convert_expr(node.value)
-                if not self.is_defined_anywhere(target):
+                if not self.is_defined_local(target):
                     self.define_var(target)
                     self.emit(f"let {target} = {value};")
                 else:
@@ -192,7 +205,9 @@ class PythonToJS(ast.NodeVisitor):
 
     def convert_expr(self, node):
         if isinstance(node, ast.Constant):
-            if isinstance(node.value, bool):
+            if node.value is None:
+                return "null"
+            elif isinstance(node.value, bool):
                 return str(node.value).lower()
             return repr(node.value)
         elif isinstance(node, ast.Name):
@@ -201,11 +216,27 @@ class PythonToJS(ast.NodeVisitor):
             elif node.id == 'range':
                 return '/* range */'  
             return node.id
+        
         elif isinstance(node, ast.BinOp):
-            left = self.convert_expr(node.left)
-            right = self.convert_expr(node.right)
-            op = self.convert_operator(node.op)
-            return f"{left} {op} {right}"
+            op_type = type(node.op)
+            op_str = self.convert_operator(node.op)
+
+            def wrap(expr, inner_node):
+                if isinstance(inner_node, ast.BinOp):
+                    inner_prec = self.BIN_OP_PRECEDENCE.get(type(inner_node.op), 0)
+                    outer_prec = self.BIN_OP_PRECEDENCE.get(op_type, 0)
+                    if inner_prec < outer_prec:
+                        return f"({expr})"
+                return expr
+
+            left = wrap(self.convert_expr(node.left), node.left)
+            right = wrap(self.convert_expr(node.right), node.right)
+
+            if isinstance(node.op, ast.FloorDiv):
+                return f"Math.floor({left} / {right})"
+            return f"{left} {op_str} {right}"
+
+
         
         elif isinstance(node, ast.BoolOp):
             op = self.convert_operator(node.op)
@@ -302,7 +333,7 @@ class PythonToJS(ast.NodeVisitor):
     def convert_operator(self, op):
         operators = {
             ast.Add: '+', ast.Sub: '-', ast.Mult: '*', ast.Div: '/',
-            ast.Mod: '%', ast.Pow: '**', ast.FloorDiv: '//',
+            ast.Mod: '%', ast.Pow: '**',
             ast.And: '&&', ast.Or: '||',
             ast.Eq: '==', ast.NotEq: '!=', ast.Lt: '<', ast.LtE: '<=',
             ast.Gt: '>', ast.GtE: '>=',

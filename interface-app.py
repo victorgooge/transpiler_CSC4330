@@ -60,11 +60,13 @@ with col1:
 
     if st.button("Transpile"):
         if python_code.strip():
+            comments = extract_comments(python_code)
+            transpiler = PythonToJS(comments)
             st.session_state.js_output = transpiler.transpile(python_code)
             st.session_state.js_editor_key = str(uuid.uuid4()) 
         else:
             st.session_state.js_output = "// Please write some Python code."
-            st.session_state.js_editor_key = str(uuid.uuid4())  
+            st.session_state.js_editor_key = str(uuid.uuid4())
 
 
 with col2:
