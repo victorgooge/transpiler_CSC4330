@@ -99,18 +99,38 @@ class PythonToJS(ast.NodeVisitor):
                 self.emit(f"// {comment_text}")
 
     def visit_If(self, node):
-        test = self.convert_expr(node.test)
-        self.emit(f"if {test} {{")
-        self.indent_level += 1
-        for stmt in node.body:
-            self.visit(stmt)
-        self.indent_level -= 1
-        self.emit("} else {")
-        self.indent_level += 1
-        for stmt in node.orelse:
-            self.visit(stmt)
-        self.indent_level -= 1
-        self.emit("}")
+        current = node
+        first = True
+
+        while True:
+            test = self.convert_expr(current.test)
+            if first:
+                self.emit(f"if ({test}) {{")
+                first = False
+            else:
+                self.emit(f"}} else if ({test}) {{")
+
+            self.indent_level += 1
+            for stmt in current.body:
+                self.visit(stmt)
+            self.indent_level -= 1
+
+            # Handle elif chains
+            if len(current.orelse) == 1 and isinstance(current.orelse[0], ast.If):
+                current = current.orelse[0]
+            else:
+                break
+
+        # Handle final else (if any)
+        if current.orelse:
+            self.emit("} else {")
+            self.indent_level += 1
+            for stmt in current.orelse:
+                self.visit(stmt)
+            self.indent_level -= 1
+            self.emit("}")
+        else:
+            self.emit("}")
 
     def visit_For(self, node):
         target = self.convert_expr(node.target)
@@ -170,11 +190,22 @@ class PythonToJS(ast.NodeVisitor):
             left = self.convert_expr(node.left)
             right = self.convert_expr(node.right)
             op = self.convert_operator(node.op)
-            return f"({left} {op} {right})"
+            return f"{left} {op} {right}"
+        
         elif isinstance(node, ast.BoolOp):
             op = self.convert_operator(node.op)
-            values = f" {op} ".join(self.convert_expr(v) for v in node.values)
-            return f"({values})"
+            parts = []
+            for v in node.values:
+                expr = self.convert_expr(v)
+                # Only wrap if it's not a simple literal or name
+                if isinstance(v, (ast.Constant, ast.Name)):
+                    parts.append(expr)
+                else:
+                    parts.append(f"({expr})")
+            return f" {op} ".join(parts)
+
+
+
         elif isinstance(node, ast.Compare):
             left = self.convert_expr(node.left)
             comparisons = []

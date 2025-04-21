@@ -85,7 +85,8 @@ with col2:
         value=st.session_state.js_output,
         language="javascript",
         theme=st.session_state.editor_theme,
-        key=st.session_state.js_editor_key,  # 👈 Key changes = rerender
+        key=st.session_state.js_editor_key, 
         height=400,
-        readonly=True
+        readonly=True,
+        auto_update=True
     )
